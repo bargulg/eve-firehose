@@ -16,7 +16,7 @@ class MarketMessageProcessor():
         self.es = elasticsearch.Elasticsearch()
 
     def fail(self, what, reason):
-        return {"success" : False, "type" : what, "reason" : reason}
+        return {"success": False, "type": what, "reason": reason}
 
     def parse_row(self, cols, row):
         ret = {}
@@ -36,12 +36,12 @@ class MarketMessageProcessor():
 
     def check_orders_msg(self, message):
         required_cols = ['price', 'volRemaining', 'range', 'orderID', 'volEntered',
-                        'minVolume', 'bid', 'issueDate', 'duration', 'stationID',
-                        'solarSystemID']
+                         'minVolume', 'bid', 'issueDate', 'duration', 'stationID',
+                         'solarSystemID']
 
         floatCols = ['price']
         intCols = ['volRemaining', 'range', 'orderID', 'volEntered',
-                  'minVolume', 'duration', 'stationID', 'solarSystemID']
+                   'minVolume', 'duration', 'stationID', 'solarSystemID']
         boolCols = ['bid']
         dateCols = ['issueDate']
 
@@ -105,10 +105,10 @@ class MarketMessageProcessor():
         for rowset in message["rowsets"]:
             generatedAt = self.datestring2timestamp(rowset["generatedAt"])
 
-            itemData = {"typeID" : rowset["typeID"],
-                        "regionID" : rowset["regionID"],
-                        "generatedAt" : generatedAt,
-                        "orders" : []}
+            itemData = {"typeID": rowset["typeID"],
+                        "regionID": rowset["regionID"],
+                        "generatedAt": generatedAt,
+                        "orders": []}
 
             # construct custom type-region ID
             constructedID = str(itemData["typeID"]) + "-" + str(itemData["regionID"])
@@ -144,7 +144,7 @@ class MarketMessageProcessor():
                 return self.fail("orders", "can't insert into elasticsearch db: "
                                  + str(sys.exc_info()[1]))
 
-            return {"success" : True, "type" : "orders", "number" : numOrders}
+            return {"success": True, "type": "orders", "number": numOrders}
 
     def check_history_msg(self, message):
         required_cols = ['date', 'orders', 'quantity', 'low', 'high', 'average']
@@ -207,10 +207,10 @@ class MarketMessageProcessor():
         for rowset in message["rowsets"]:
             generatedAt = self.datestring2timestamp(rowset["generatedAt"])
 
-            itemData = {"typeID" : rowset["typeID"],
-                        "regionID" : rowset["regionID"],
-                        "generatedAt" : generatedAt,
-                        "history" : []}
+            itemData = {"typeID": rowset["typeID"],
+                        "regionID": rowset["regionID"],
+                        "generatedAt": generatedAt,
+                        "history": []}
 
             # construct custom type-region ID
             constructedID = str(itemData["typeID"]) + "-" + str(itemData["regionID"])
@@ -247,4 +247,4 @@ class MarketMessageProcessor():
                 return self.fail("history", "can't insert into elasticsearch db: "
                                  + str(sys.exc_info()[1]))
 
-        return {"success" : True, "type" : "history", "number" : numHistory}
+        return {"success": True, "type": "history", "number": numHistory}

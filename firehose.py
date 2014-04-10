@@ -9,7 +9,13 @@ import multiprocessing
 import marketmessageprocessor
 
 
+# needed for initializing worker processes
 processor = None
+
+# general runtime statistics used by the callback method
+stats = {"failed": 0, "orders": 0, "history": 0, "errors": {}}
+
+
 def init_worker():
     # ignore keyboard interrupt
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -29,10 +35,9 @@ def process_message(payload):
     elif message["resultType"] == "history":
         return processor.process_history(message)
     else:
-        return {"success" : False, "type" : message["resultType"]}
+        return {"success": False, "type": message["resultType"]}
 
 
-stats = {"failed" : 0, "orders": 0, "history" : 0, "errors" : {}}
 def callback(result):
     # just displays runtime stats
     if not result["success"]:
