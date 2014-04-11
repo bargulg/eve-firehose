@@ -15,6 +15,9 @@ processor = None
 # general runtime statistics used by the callback method
 stats = {"failed": 0, "orders": 0, "history": 0, "errors": {}}
 
+# worker process pool
+pool = None
+
 
 def init_worker():
     # ignore keyboard interrupt
@@ -63,6 +66,7 @@ def main():
     subscriber.setsockopt(zmq.SUBSCRIBE, "")
 
     # process pool init
+    global pool
     pool = multiprocessing.Pool(initializer=init_worker, initargs=[])
 
     while True:
@@ -75,6 +79,10 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
+        # wait for pool to finish processing queued work and clean it up
+        pool.close()
+        pool.join()
+
         # fix term
         print
 
