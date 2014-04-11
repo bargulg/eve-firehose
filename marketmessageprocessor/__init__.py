@@ -26,7 +26,7 @@ class MarketMessageProcessor():
 
     def is_datestring(self, datestring):
         try:
-            dateutil.parser.parse(datestring).timetuple()
+            dateutil.parser.parse(datestring)
             return True
         except ValueError:
             return False
