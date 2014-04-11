@@ -89,5 +89,5 @@ if __name__ == '__main__':
         # show failure types and counts
         print
         print "Failures by type:"
-        for failType in stats["errors"]:
-            print "\t", failType, ":", stats["errors"][failType]
+        for failType in sorted(stats["errors"], key=stats["errors"].get, reverse=True):
+            print "\t", stats["errors"][failType], "\t", failType
