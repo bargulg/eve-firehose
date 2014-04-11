@@ -25,8 +25,11 @@ class MarketMessageProcessor():
         return ret
 
     def is_datestring(self, datestring):
-        #TODO: implement
-        return True
+        try:
+            dateutil.parser.parse(datestring).timetuple()
+            return True
+        except ValueError:
+            return False
 
     def datestring2timestamp(self, datestring):
         ret = dateutil.parser.parse(datestring).timetuple()
