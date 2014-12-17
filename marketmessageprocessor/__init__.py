@@ -21,10 +21,7 @@ class MarketMessageProcessor():
         return {"success": False, "type": what, "reason": reason}
 
     def parse_row(self, cols, row):
-        ret = {}
-        for i in range(len(cols)):
-            ret[cols[i]] = row[i]
-        return ret
+        return dict(zip(cols,row))
 
     def is_datestring(self, datestring):
         try:
