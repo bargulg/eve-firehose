@@ -54,8 +54,9 @@ def callback(result):
     elif result["type"] == "history":
         stats["history"] += result["number"]
 
-    sys.stdout.write("\r\t" + str(stats["orders"]) + " orders / " + str(stats["history"])
-                     + " history / " + str(stats["failed"]) + " failed ")
+    sys.stdout.write('\r\t%s orders / %s history / %s failed '
+                     % (stats['orders'], stats['history'], stats['failed']))
+
     sys.stdout.flush()
 
 
@@ -83,6 +84,7 @@ if __name__ == '__main__':
         # wait for pool to finish processing queued work and clean it up
         pool.close()
         pool.join()
+        errors = stats['errors']
 
         # fix term
         print
@@ -90,5 +92,5 @@ if __name__ == '__main__':
         # show failure types and counts
         print
         print "Failures by type:"
-        for failType in sorted(stats["errors"], key=stats["errors"].get, reverse=True):
-            print "\t", stats["errors"][failType], "\t", failType
+        for failType in sorted(errors, key=errors.get, reverse=True):
+            print '\t%s\t%s' % (errors[failType], failType)
