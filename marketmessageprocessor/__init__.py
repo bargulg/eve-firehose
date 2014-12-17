@@ -1,5 +1,6 @@
 #!/usr/bin/env python2
 import sys
+import time
 import logging
 import calendar
 import traceback
@@ -14,6 +15,7 @@ logging.basicConfig(level=50)
 class MarketMessageProcessor():
     def __init__(self):
         self.es = elasticsearch.Elasticsearch()
+        self.processed = 0
 
     def fail(self, what, reason):
         return {"success": False, "type": what, "reason": reason}
@@ -106,48 +108,116 @@ class MarketMessageProcessor():
         # rowset contains orders and metadata for a single typeID,
         # message can contain multiple rowsets
         for rowset in message["rowsets"]:
+            typeID = rowset['typeID']
+            regionID = rowset['regionID']
+            processedAt = int(time.time())
             generatedAt = self.datestring2timestamp(rowset["generatedAt"])
 
-            itemData = {"typeID": rowset["typeID"],
-                        "regionID": rowset["regionID"],
-                        "generatedAt": generatedAt,
-                        "orders": []}
-
-            # construct custom type-region ID
-            constructedID = str(itemData["typeID"]) + "-" + str(itemData["regionID"])
-
-            # check whether the received data is in fact new
-            try:
-                oldData = self.es.get(index="orders", doc_type="item-region",
-                                      id=constructedID)
-                if oldData["_source"]["generatedAt"] > generatedAt:
-                    # received stale data, fayul
-                    return self.fail("orders", "stale data")
-            except elasticsearch.exceptions.NotFoundError:
-                # no record found in DB is fine, continue
-                pass
-            except:
-                # something failed hard
-                return self.fail("orders", "can't read from elasticsearch db: "
-                                 + str(sys.exc_info()[1]))
+            # data for removal of fulfilled/cancelled orders
+            activeIDs = set()
 
             # row contains data for a single order
             for row in rowset["rows"]:
-                order = self.parse_row(message["columns"], row)
-                order["issueDate"] = self.datestring2timestamp(order["issueDate"])
-                itemData["orders"].append(order)
                 numOrders += 1
 
-            # insert new/updated order data into DB
-            try:
-                self.es.index(index="orders", doc_type="item-region", id=constructedID,
-                              body=itemData, timestamp=generatedAt)
-            except:
-                # something failed hard
-                return self.fail("orders", "can't insert into elasticsearch db: "
-                                 + str(sys.exc_info()[1]))
+                o = self.parse_row(message["columns"], row)
+                o["issueDate"] = self.datestring2timestamp(o["issueDate"])
 
-            return {"success": True, "type": "orders", "number": numOrders}
+                orderID = o['orderID']
+                activeIDs.add(orderID)
+                ttl = o['issueDate'] + o['duration']*24*60*60
+                order_data = {'typeID': typeID,
+                              'regionID': regionID,
+                              'generatedAt': generatedAt,
+                              'processedAt': processedAt,
+                              'price': o['price'],
+                              'volRemaining': o['volRemaining'],
+                              'range': o['range'],
+                              'volEntered': o['volEntered'],
+                              'minVolume': o['minVolume'],
+                              'bid': o['bid'],
+                              'issueDate': o['issueDate'],
+                              'duration': o['duration'],
+                              'stationID': o['stationID'],
+                              'probablyOld': False}
+
+                # check whether the received data is in fact new
+                try:
+                    oldData = self.es.get_source(index="emdr", doc_type="order",
+                                                id=orderID)
+                    if oldData["generatedAt"] >= generatedAt \
+                            or oldData["volRemaining"] < o['volRemaining']:
+                        # reveived stale data, fayul
+                        continue
+                except elasticsearch.exceptions.NotFoundError:
+                    # no record found in DB is fine, continue
+                    pass
+                except:
+                    # something failed hard
+                    return self.fail("order", "can't read from elasticsearch db: "
+                                     + str(sys.exc_info()[1]))
+
+                # insert new/updated order data into DB
+                try:
+                    self.es.index(index="emdr", doc_type="order", id=orderID,
+                                  body=order_data, timestamp=o['issueDate'],
+                                  ttl=ttl)
+                except:
+                    # something failed hard
+                    return self.fail("orders", "can't insert into elasticsearch db: "
+                                     + str(sys.exc_info()[1]))
+
+            # now try to mark fulfilled/cancelled orders
+            # 1) select all order IDs for given typeID/regionID pair
+            query = {
+                "filtered": {
+                    "filter": {
+                        "and": [
+                            {"term": {"typeID": typeID}},
+                            {"term": {"regionID": regionID}},
+                        ]
+                    }
+                }
+            }
+            allIDs = set()
+            # start the scan search scroller (no results returned here)
+            scroller = self.es.search(index="emdr", doc_type="order",
+                                      body={"query": query},
+                                      _source=False,
+                                      scroll="1m",
+                                      search_type="scan")
+            scrollID = scroller['_scroll_id']
+            while True:
+                ret = self.es.scroll(scroll_id=scrollID, scroll="1m")
+                scrollID = ret['_scroll_id']
+                moreIDs = [int(a['_id']) for a in ret['hits']['hits']]
+                if moreIDs == []:
+                    break
+                allIDs.update(set(moreIDs))
+            # 2) remove activeIDs from the set
+            inactiveIDs = list(allIDs.difference(activeIDs))
+            # 3) mark the remaining orders as probably old
+            for orderID in inactiveIDs:
+                try:
+                    oldData = self.es.get_source(index="emdr",
+                                                 doc_type="order",
+                                                 id=orderID)
+                    oldData['probablyOld'] = True
+                    ttl = oldData['issueDate'] + oldData['duration']*24*60*60
+                    self.es.index(index="emdr", doc_type="order", id=orderID,
+                                  body=oldData,
+                                  timestamp=oldData['issueDate'],
+                                  ttl=ttl)
+                except elasticsearch.exceptions.NotFoundError:
+                    # probably ttl expired already
+                    pass
+                except:
+                    # something failed hard
+                    return self.fail("order", "can't read from elasticsearch db: "
+                                     + str(sys.exc_info()[1]))
+
+
+        return {"success": True, "type": "orders", "number": numOrders}
 
     def check_history_msg(self, message):
         required_cols = ['date', 'orders', 'quantity', 'low', 'high', 'average']
@@ -197,57 +267,4 @@ class MarketMessageProcessor():
                 assert history["average"] <= history["high"]
 
     def process_history(self, message):
-        try:
-            self.check_history_msg(message)
-        except:
-            failedLine = traceback.extract_tb(sys.exc_info()[2])[-1][3]
-            self.fail("history", "check failed: " + str(failedLine))
-
-        numHistory = 0
-
-        # rowset contains history and metadata for a single typeID,
-        # message can contain multiple rowsets
-        for rowset in message["rowsets"]:
-            generatedAt = self.datestring2timestamp(rowset["generatedAt"])
-
-            itemData = {"typeID": rowset["typeID"],
-                        "regionID": rowset["regionID"],
-                        "generatedAt": generatedAt,
-                        "history": []}
-
-            # construct custom type-region ID
-            constructedID = str(itemData["typeID"]) + "-" + str(itemData["regionID"])
-
-            # check whether the received data is in fact new
-            try:
-                oldData = self.es.get(index="history", doc_type="item-region",
-                                      id=constructedID)
-                if oldData["_source"]["generatedAt"] > generatedAt:
-                    # reveived stale data, fayul
-                    return self.fail("history", "stale data")
-            except elasticsearch.exceptions.NotFoundError:
-                # no record found in DB is fine, continue
-                pass
-            except:
-                # something failed hard
-                return self.fail("history", "can't read from elasticsearch db: "
-                                 + str(sys.exc_info()[1]))
-
-            # row contains history data (one row for each day)
-            for row in rowset["rows"]:
-                history = self.parse_row(message["columns"], row)
-                history["date"] = self.datestring2timestamp(history["date"])
-                itemData["history"].append(history)
-                numHistory += 1
-
-            # insert new/updated history data into DB
-            #XXX; yes, it can overwrite history that can't be changed in reality (NOTABUG)
-            try:
-                self.es.index(index="history", doc_type="item-region",
-                              id=constructedID, body=itemData, timestamp=generatedAt)
-            except:
-                # something failed hard
-                return self.fail("history", "can't insert into elasticsearch db: "
-                                 + str(sys.exc_info()[1]))
-
-        return {"success": True, "type": "history", "number": numHistory}
+        raise NotImplementedError

@@ -36,7 +36,8 @@ def process_message(payload):
     if message["resultType"] == "orders":
         return processor.process_orders(message)
     elif message["resultType"] == "history":
-        return processor.process_history(message)
+        #return processor.process_history(message)
+        return {"success": True, "type": "history", "number": 1}
     else:
         return {"success": False, "type": message["resultType"]}
 
