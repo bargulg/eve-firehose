@@ -48,10 +48,7 @@ class MarketMessageProcessor():
         dateCols = ['issueDate']
 
         assert "columns" in message
-        assert len(message["columns"]) == len(required_cols)
-
-        for col in required_cols:
-            assert col in message["columns"]
+        assert sorted(message['columns']) == sorted(required_cols)
 
         assert "rowsets" in message
 
